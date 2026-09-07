@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Atreus Visual Engine - Mobile</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #08080f;
+    --panel: #14141f;
+    --accent: #5ec2ff;
+    --text: #e6e6f0;
+    --muted: #8a8aa0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  header {
+    padding: 0.75rem 1rem;
+    background: var(--panel);
+    border-bottom: 1px solid #26263a;
+  }
+  header h1 { font-size: 1rem; margin: 0; }
+  header .status { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+  #canvas-wrap { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000; }
+  canvas { width: 100%; height: 100%; display: block; }
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--panel);
+  }
+  .metric { background: #1c1c2b; border-radius: 8px; padding: 0.5rem 0.75rem; }
+  .metric .label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+  .metric .value { font-size: 1.1rem; font-weight: 600; color: var(--accent); }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem 1.25rem;
+  }
+  button {
+    flex: 1 1 auto;
+    min-width: 6rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid #33334a;
+    border-radius: 8px;
+    background: #1c1c2b;
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+  button:active { background: #26263f; }
+  .sliders { padding: 0 1rem 1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+  .slider-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+  .slider-row label { width: 5.5rem; color: var(--muted); }
+  .slider-row input { flex: 1; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Atreus Visual Engine</h1>
+    <div class="status" id="conn-status">Connecting…</div>
+  </header>
+
+  <div id="canvas-wrap">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div class="metrics">
+    <div class="metric"><div class="label">Particles shown</div><div class="value" id="m-particles">-</div></div>
+    <div class="metric"><div class="label">Total particles</div><div class="value" id="m-total">-</div></div>
+    <div class="metric"><div class="label">Iteration</div><div class="value" id="m-iteration">-</div></div>
+    <div class="metric"><div class="label">Sim FPS</div><div class="value" id="m-fps">-</div></div>
+    <div class="metric"><div class="label">Messages/sec</div><div class="value" id="m-msgrate">-</div></div>
+    <div class="metric"><div class="label">Last update age</div><div class="value" id="m-age">-</div></div>
+  </div>
+
+  <div class="controls">
+    <button id="btn-pause">Pause</button>
+    <button id="btn-resume">Resume</button>
+    <button id="btn-reset">Reset</button>
+  </div>
+  <div class="sliders">
+    <div class="slider-row">
+      <label for="attraction">Attraction</label>
+      <input type="range" id="attraction" min="0" max="0.2" step="0.005" value="0.02" />
+    </div>
+    <div class="slider-row">
+      <label for="jitter">Jitter</label>
+      <input type="range" id="jitter" min="0" max="30" step="0.5" value="6" />
+    </div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const statusEl = document.getElementById("conn-status");
+
+  const worldWidth = 1280;
+  const worldHeight = 720;
+
+  function resizeCanvas() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+  }
+  window.addEventListener("resize", resizeCanvas);
+  resizeCanvas();
+
+  let latest = null;
+  let messageTimestamps = [];
+  let lastMessageAt = null;
+
+  function draw() {
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (latest) {
+      const sx = canvas.width / worldWidth;
+      const sy = canvas.height / worldHeight;
+      const positions = latest.positions;
+      const colors = latest.colors;
+      for (let i = 0; i < positions.length; i++) {
+        const [x, y] = positions[i];
+        const [r, g, b] = colors[i];
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(x * sx, y * sy, 2, 2);
+      }
+    }
+    requestAnimationFrame(draw);
+  }
+  requestAnimationFrame(draw);
+
+  function updateMetrics() {
+    if (!latest) return;
+    document.getElementById("m-particles").textContent = latest.sample_count;
+    document.getElementById("m-total").textContent = latest.particle_count;
+    document.getElementById("m-iteration").textContent = latest.iteration;
+    document.getElementById("m-fps").textContent = latest.fps.toFixed(1);
+
+    const now = Date.now();
+    messageTimestamps = messageTimestamps.filter((t) => now - t < 5000);
+    const rate = messageTimestamps.length / 5;
+    document.getElementById("m-msgrate").textContent = rate.toFixed(2);
+  }
+
+  setInterval(() => {
+    if (lastMessageAt !== null) {
+      const ageMs = Date.now() - lastMessageAt;
+      document.getElementById("m-age").textContent = `${ageMs} ms`;
+    }
+  }, 250);
+
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${proto}://${location.host}/ws/particles`);
+
+    ws.onopen = () => { statusEl.textContent = "Connected"; };
+    ws.onclose = () => {
+      statusEl.textContent = "Disconnected - retrying…";
+      setTimeout(connect, 1000);
+    };
+    ws.onerror = () => { ws.close(); };
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      if (data.type === "snapshot") {
+        latest = data;
+        lastMessageAt = Date.now();
+        messageTimestamps.push(lastMessageAt);
+        updateMetrics();
+      }
+    };
+
+    window.__sendCommand = (action, payload) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ action, payload: payload || null }));
+      }
+    };
+  }
+  connect();
+
+  document.getElementById("btn-pause").addEventListener("click", () => window.__sendCommand("pause"));
+  document.getElementById("btn-resume").addEventListener("click", () => window.__sendCommand("resume"));
+  document.getElementById("btn-reset").addEventListener("click", () => window.__sendCommand("reset"));
+
+  document.getElementById("attraction").addEventListener("change", (e) => {
+    window.__sendCommand("set_param", { name: "attraction", value: parseFloat(e.target.value) });
+  });
+  document.getElementById("jitter").addEventListener("change", (e) => {
+    window.__sendCommand("set_param", { name: "jitter", value: parseFloat(e.target.value) });
+  });
+})();
+</script>
+</body>
+</html>
