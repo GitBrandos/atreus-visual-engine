@@ -146,8 +146,8 @@ def create_app(
             app.state.controller.submit(
                 AgentCommand(action=message.action, payload=message.payload)
             )
-        except ValueError as exc:
-            return {"ok": False, "error": str(exc)}
+        except ValueError:
+            return {"ok": False, "error": f"Unsupported action: {message.action}"}
         return {"ok": True}
 
     @app.websocket("/ws/particles")
@@ -162,8 +162,9 @@ def create_app(
                         AgentCommand(action=message.action, payload=message.payload)
                     )
                     await websocket.send_json({"type": "ack", "action": message.action})
-                except (ValueError, TypeError) as exc:
-                    await websocket.send_json({"type": "error", "error": str(exc)})
+                except (ValueError, TypeError):
+                    action = raw.get("action") if isinstance(raw, dict) else None
+                    await websocket.send_json({"type": "error", "error": f"Invalid command: {action}"})
         except WebSocketDisconnect:
             pass
         finally:
