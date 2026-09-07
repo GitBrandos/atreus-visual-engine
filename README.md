@@ -1,6 +1,1 @@
-# atreus-visual-engine
-A Python particle sandbox that visually demonstrates Earth systems and planetary dynamics
-
-mkdir -p atreus/{agents,protocol,sandbox,theorems}
-cd atreus
-touch main.py
+4efd867f4844a5ece6e09036f4d5c896331bfd0b
