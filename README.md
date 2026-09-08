@@ -1,32 +1,49 @@
-# Atreus Visual Engine
+# Atreus — an AI Character & Simulation Engine
 
-Atreus Visual Engine is a desktop particle sandbox that streams a live,
-down-sampled view of its simulation to a mobile web browser.
+Atreus is a platform for creating and interacting with custom, user-authored
+AI characters inside a live simulated environment. It combines a desktop
+particle sandbox (the "World Engine") with a lightweight character system
+(the "Character Engine") and streams both to a mobile web browser in
+real time.
 
 ## Architecture
 
 ```
-Desktop Simulation (pygame, numpy)
-  100,000 particles @ ~60 FPS
-        │  SimulationLoop.tick() every frame
-        ▼
-SharedParticleCache (thread-safe, in-process)
-  down-sampled to 2,500 particles, refreshed every 100ms
-        │  read by the async broadcast loop (no blocking I/O in the sim thread)
+Desktop Simulation (pygame, numpy)            atreus/character/
+  100,000 particles @ ~60 FPS                   Character (data model)
+        │  SimulationLoop.tick() every frame     CharacterRegistry (CRUD)
+        ▼                                        DialogueEngine (pluggable)
+SharedParticleCache (thread-safe, in-process)         │
+  down-sampled to 2,500 particles, refreshed          │ character state
+  every 100ms, plus the latest character states        │ (idle/active/reacting)
+        │  read by the async broadcast loop ◄──────────┘
+        │  (no blocking I/O in the sim thread)
         ▼
 FastAPI backend (WebSocket + HTTP)
-  broadcasts cache snapshots to all connected clients every 500ms
+  broadcasts cache snapshots (incl. character states) every 500ms
+  serves character CRUD + chat endpoints
         │  wss://.../ws/particles
         ▼
 Mobile Web UI (single HTML page)
-  canvas rendering, live metrics, network stats, agent controls
+  canvas rendering, live metrics, network stats, agent controls,
+  character select/chat panel
 ```
 
-The simulation, cache, and server all share the same process and the same
-`ParticleSystem` / `SharedParticleCache` / `AgentController` instances, so
-the mobile view mirrors what's shown on the desktop window. The cache is
-only ever touched under a short-lived lock (a numpy slice + copy), so slow
-network clients never stall the physics loop.
+The simulation, cache, character registry, and server all share the same
+process and the same `ParticleSystem` / `SharedParticleCache` /
+`AgentController` / `CharacterRegistry` instances, so the mobile view
+mirrors what's shown on the desktop window. The cache is only ever touched
+under a short-lived lock (a numpy slice + copy), so slow network clients
+never stall the physics loop.
+
+The `character` package is intentionally optional and decoupled: with zero
+characters registered, the particle sandbox behaves exactly as it always
+has. A character is pure data (name, description, traits, backstory,
+interests, allowed interaction modes) plus a narrow, pluggable
+`DialogueEngine` interface for generating responses — no assumption is
+built in about tone or content beyond what a given character's traits
+specify, so the system supports hobbyist, educational, storytelling, or
+customer-service-style characters alike.
 
 Configuration constants live in `atreus/config.py`:
 
@@ -77,14 +94,18 @@ Endpoints:
 - `GET /` — mobile web UI
 - `GET /api/status` — JSON status/metrics (iteration, particle counts, FPS, last update age)
 - `POST /api/agent-command` — send `{"action": "pause" | "resume" | "reset" | "set_param", "payload": {...}}`
-- `WS /ws/particles` — subscribe to snapshot broadcasts; send the same JSON command shape to control the simulation over the socket
+- `WS /ws/particles` — subscribe to snapshot broadcasts (now including a `character_states` map); send the same JSON command shape to control the simulation over the socket
+- `GET /api/characters` — list all registered characters
+- `POST /api/characters` — register a new character (`{"id", "name", "description", "backstory", "traits": {...}, "interests": [...], "interaction_modes": [...]}`); trait values and content are validated server-side
+- `GET /api/characters/{character_id}` — fetch a single character
+- `POST /api/characters/{character_id}/message` — send `{"message": "..."}` and get back `{"text": "...", "state": "idle" | "active" | "reacting"}`; the resulting state is also reflected in subsequent `/ws/particles` snapshots
 
 ## Opening the mobile UI from a phone on the same network
 
 1. Find your machine's LAN IP address (e.g. `ifconfig` / `ipconfig`, look for something like `192.168.x.x`).
 2. Start the server as above, bound to `0.0.0.0` (the default) so it's reachable from other devices.
 3. On your phone (connected to the same Wi-Fi network), open `http://<your-lan-ip>:8000/` in a browser.
-4. The page connects to `/ws/particles` automatically and renders the live particle stream, with pause/resume/reset buttons and attraction/jitter sliders.
+4. The page connects to `/ws/particles` automatically and renders the live particle stream, with pause/resume/reset buttons, attraction/jitter sliders, and a character select/chat panel.
 
 ## Expected update rates and limitations
 
@@ -93,4 +114,6 @@ Endpoints:
 - Mobile broadcast: every 500ms per connected client; actual mobile framerate is therefore ~2 updates/sec, not 60 FPS — this is a deliberate bandwidth/latency tradeoff for phones on Wi-Fi.
 - The mobile canvas interpolates nothing between updates (particles "jump" every 500ms); this keeps the client simple at the cost of visual smoothness.
 - Agent commands are applied on the next simulation tick after being queued, so there is up to one frame of latency.
-- This is a single-process, in-memory architecture: running the desktop simulation and the FastAPI server as separate OS processes will give each its own independent simulation state (no cross-process IPC is implemented).
+- This is a single-process, in-memory architecture: running the desktop simulation and the FastAPI server as separate OS processes will give each its own independent simulation state (no cross-process IPC is implemented). The character registry is likewise in-memory and not yet persisted across restarts.
+- The bundled `TemplateDialogueEngine` is a minimal, fully offline, rule-based default; swap in a real inference backend by implementing the `DialogueEngine` protocol in `atreus/character/dialogue.py`.
+
