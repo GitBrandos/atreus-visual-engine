@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import time
 from threading import Event
+from typing import TYPE_CHECKING
 
 from atreus.agents import AgentController
 from atreus.bridge.cache import SharedParticleCache
 from atreus.config import CACHE_SYNC_INTERVAL_MS, TARGET_FPS
 from atreus.simulation.particles import ParticleSystem
+
+if TYPE_CHECKING:  # pragma: no cover - avoids a runtime circular import
+    from atreus.character.registry import CharacterRegistry
 
 
 class SimulationLoop:
@@ -24,10 +28,12 @@ class SimulationLoop:
         system: ParticleSystem,
         cache: SharedParticleCache,
         controller: AgentController,
+        character_registry: CharacterRegistry | None = None,
     ) -> None:
         self.system = system
         self.cache = cache
         self.controller = controller
+        self.character_registry = character_registry
         self._last_cache_update = 0.0
         self._stop = Event()
 
@@ -41,7 +47,17 @@ class SimulationLoop:
 
         now = time.perf_counter()
         if (now - self._last_cache_update) * 1000.0 >= CACHE_SYNC_INTERVAL_MS:
-            self.cache.update(self.system, fps=fps, frame_time_ms=frame_time_ms)
+            character_states = None
+            if self.character_registry is not None:
+                character_states = {
+                    c.id: c.state.value for c in self.character_registry.list()
+                }
+            self.cache.update(
+                self.system,
+                fps=fps,
+                frame_time_ms=frame_time_ms,
+                character_states=character_states,
+            )
             self._last_cache_update = now
 
     def stop(self) -> None:

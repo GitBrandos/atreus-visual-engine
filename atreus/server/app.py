@@ -127,12 +127,17 @@ def create_app(
     app.state.cache = cache if cache is not None else SharedParticleCache()
     app.state.controller = controller if controller is not None else AgentController()
     app.state.manager = ConnectionManager()
-    app.state.loop = SimulationLoop(app.state.system, app.state.cache, app.state.controller)
+    app.state.character_registry = character_registry if character_registry is not None else CharacterRegistry()
+    app.state.dialogue_engine = dialogue_engine if dialogue_engine is not None else TemplateDialogueEngine()
+    app.state.loop = SimulationLoop(
+        app.state.system,
+        app.state.cache,
+        app.state.controller,
+        character_registry=app.state.character_registry,
+    )
     app.state.sim_thread = None
     app.state.run_simulation = run_simulation
     app.state.started_at = time.time()
-    app.state.character_registry = character_registry if character_registry is not None else CharacterRegistry()
-    app.state.dialogue_engine = dialogue_engine if dialogue_engine is not None else TemplateDialogueEngine()
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:

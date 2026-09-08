@@ -28,6 +28,7 @@ class ParticleSnapshotMessage(BaseModel):
     sample_count: int
     fps: float = 0.0
     frame_time_ms: float = 0.0
+    character_states: dict[str, str] = Field(default_factory=dict)
 
 
 class StatusMessage(BaseModel):
