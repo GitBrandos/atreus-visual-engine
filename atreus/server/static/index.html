@@ -63,6 +63,52 @@
   .slider-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
   .slider-row label { width: 5.5rem; color: var(--muted); }
   .slider-row input { flex: 1; }
+  .monica-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem 1.25rem;
+    border-top: 1px solid #26263a;
+  }
+  .monica-header { display: flex; align-items: center; gap: 0.6rem; }
+  .monica-avatar {
+    width: 2.4rem;
+    height: 2.4rem;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #ff8fd6, var(--accent));
+    color: #08080f;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+  }
+  .monica-name { font-weight: 600; }
+  .monica-log {
+    max-height: 8rem;
+    overflow-y: auto;
+    background: #1c1c2b;
+    border-radius: 8px;
+    padding: 0.5rem 0.6rem;
+    font-size: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .monica-log .msg-user { color: var(--muted); }
+  .monica-log .msg-monica { color: var(--text); }
+  .monica-input-row { display: flex; gap: 0.5rem; }
+  .monica-input-row input {
+    flex: 1;
+    padding: 0.5rem 0.6rem;
+    border-radius: 8px;
+    border: 1px solid #33334a;
+    background: #1c1c2b;
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+  .monica-input-row button { flex: 0 0 auto; min-width: 4.5rem; }
 </style>
 </head>
 <body>
@@ -99,6 +145,19 @@
       <input type="range" id="jitter" min="0" max="30" step="0.5" value="6" />
     </div>
   </div>
+
+  <div class="monica-panel">
+    <div class="monica-header">
+      <div class="monica-avatar">M</div>
+      <div class="monica-name">Monica</div>
+    </div>
+    <div class="monica-log" id="monica-log"></div>
+    <div class="monica-input-row">
+      <input type="text" id="monica-input" placeholder="Say hello to Monica…" />
+      <button id="monica-send">Send</button>
+    </div>
+  </div>
+
 
 <script>
 (() => {
@@ -197,6 +256,40 @@
   });
   document.getElementById("jitter").addEventListener("change", (e) => {
     window.__sendCommand("set_param", { name: "jitter", value: parseFloat(e.target.value) });
+  });
+
+  const monicaLog = document.getElementById("monica-log");
+  const monicaInput = document.getElementById("monica-input");
+
+  function appendMonicaEntry(role, text) {
+    const div = document.createElement("div");
+    div.className = role === "user" ? "msg-user" : "msg-monica";
+    div.textContent = (role === "user" ? "You: " : "Monica: ") + text;
+    monicaLog.appendChild(div);
+    monicaLog.scrollTop = monicaLog.scrollHeight;
+  }
+
+  async function sendToMonica() {
+    const text = monicaInput.value.trim();
+    if (!text) return;
+    appendMonicaEntry("user", text);
+    monicaInput.value = "";
+    try {
+      const response = await fetch("/api/monica-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text }),
+      });
+      const data = await response.json();
+      appendMonicaEntry("monica", data.reply || "(no reply)");
+    } catch (err) {
+      appendMonicaEntry("monica", "(unable to reach Monica)");
+    }
+  }
+
+  document.getElementById("monica-send").addEventListener("click", sendToMonica);
+  monicaInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendToMonica();
   });
 })();
 </script>

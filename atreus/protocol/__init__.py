@@ -39,3 +39,15 @@ class StatusMessage(BaseModel):
     fps: float
     frame_time_ms: float
     last_update_age_ms: float | None = None
+
+
+class MonicaChatRequest(BaseModel):
+    """Inbound chat message sent to the Monica character endpoint."""
+
+    message: str
+
+
+class MonicaChatResponse(BaseModel):
+    """Outbound reply from the Monica character endpoint."""
+
+    reply: str

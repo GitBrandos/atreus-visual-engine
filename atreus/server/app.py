@@ -28,8 +28,9 @@ from fastapi.staticfiles import StaticFiles
 
 from atreus.agents import AgentCommand, AgentController
 from atreus.bridge.cache import SharedParticleCache
+from atreus.character import create_character
 from atreus.config import DESKTOP_PARTICLE_COUNT, STREAM_INTERVAL_MS, TARGET_FPS
-from atreus.protocol import AgentCommandMessage, StatusMessage
+from atreus.protocol import AgentCommandMessage, MonicaChatRequest, MonicaChatResponse, StatusMessage
 from atreus.simulation.loop import SimulationLoop
 from atreus.simulation.particles import ParticleSystem
 
@@ -114,6 +115,7 @@ def create_app(
     app.state.sim_thread = None
     app.state.run_simulation = run_simulation
     app.state.started_at = time.time()
+    app.state.monica = create_character()
 
     @app.get("/", response_class=HTMLResponse)
     async def index() -> HTMLResponse:
@@ -149,6 +151,11 @@ def create_app(
         except ValueError:
             return {"ok": False, "error": f"Unsupported action: {message.action}"}
         return {"ok": True}
+
+    @app.post("/api/monica-chat", response_model=MonicaChatResponse)
+    async def monica_chat(message: MonicaChatRequest) -> MonicaChatResponse:
+        reply = await asyncio.to_thread(app.state.monica.respond, message.message)
+        return MonicaChatResponse(reply=reply)
 
     @app.websocket("/ws/particles")
     async def particles_ws(websocket: WebSocket) -> None:
