@@ -63,6 +63,42 @@
   .slider-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
   .slider-row label { width: 5.5rem; color: var(--muted); }
   .slider-row input { flex: 1; }
+  .character-panel {
+    margin: 0 1rem 1.25rem;
+    padding: 0.75rem;
+    background: var(--panel);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .character-panel h2 { font-size: 0.85rem; margin: 0 0 0.25rem; }
+  .character-row { display: flex; gap: 0.5rem; }
+  .character-row select, .character-row input, .character-row button {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid #33334a;
+    border-radius: 8px;
+    background: #1c1c2b;
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+  .character-row button { flex: 0 0 auto; }
+  #char-state-badge {
+    align-self: flex-start;
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  #char-reply {
+    min-height: 2.5rem;
+    font-size: 0.85rem;
+    color: var(--text);
+    background: #1c1c2b;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+  }
 </style>
 </head>
 <body>
@@ -99,6 +135,21 @@
       <input type="range" id="jitter" min="0" max="30" step="0.5" value="6" />
     </div>
   </div>
+
+  <div class="character-panel">
+    <h2>Characters</h2>
+    <div class="character-row">
+      <select id="char-select"><option value="">No characters yet</option></select>
+      <button id="btn-char-new">New</button>
+    </div>
+    <div id="char-state-badge">state: -</div>
+    <div class="character-row">
+      <input type="text" id="char-message" placeholder="Say something…" />
+      <button id="btn-char-send">Send</button>
+    </div>
+    <div id="char-reply"></div>
+  </div>
+
 
 <script>
 (() => {
@@ -177,6 +228,10 @@
         lastMessageAt = Date.now();
         messageTimestamps.push(lastMessageAt);
         updateMetrics();
+        const selectedId = document.getElementById("char-select").value;
+        if (selectedId && data.character_states && data.character_states[selectedId]) {
+          document.getElementById("char-state-badge").textContent = `state: ${data.character_states[selectedId]}`;
+        }
       }
     };
 
@@ -197,6 +252,88 @@
   });
   document.getElementById("jitter").addEventListener("change", (e) => {
     window.__sendCommand("set_param", { name: "jitter", value: parseFloat(e.target.value) });
+  });
+
+  // --- Character panel -------------------------------------------------
+  const charSelect = document.getElementById("char-select");
+  const charStateBadge = document.getElementById("char-state-badge");
+  const charReply = document.getElementById("char-reply");
+  const charMessageInput = document.getElementById("char-message");
+
+  function populateCharacterSelect(characters) {
+    const previous = charSelect.value;
+    charSelect.innerHTML = "";
+    if (characters.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "No characters yet";
+      charSelect.appendChild(opt);
+      return;
+    }
+    for (const character of characters) {
+      const opt = document.createElement("option");
+      opt.value = character.id;
+      opt.textContent = character.name;
+      charSelect.appendChild(opt);
+    }
+    if (characters.some((c) => c.id === previous)) {
+      charSelect.value = previous;
+    }
+  }
+
+  async function refreshCharacters() {
+    try {
+      const res = await fetch("/api/characters");
+      const characters = await res.json();
+      populateCharacterSelect(characters);
+    } catch (err) {
+      // Non-fatal: character panel is additive to the particle stream.
+    }
+  }
+  refreshCharacters();
+
+  document.getElementById("btn-char-new").addEventListener("click", async () => {
+    const name = prompt("Character name?");
+    if (!name) return;
+    const id = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 64) || `char-${Date.now()}`;
+    try {
+      await fetch("/api/characters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name }),
+      });
+      await refreshCharacters();
+      charSelect.value = id;
+    } catch (err) {
+      charReply.textContent = "Could not create character.";
+    }
+  });
+
+  async function sendCharacterMessage() {
+    const characterId = charSelect.value;
+    const message = charMessageInput.value.trim();
+    if (!characterId || !message) return;
+    try {
+      const res = await fetch(`/api/characters/${encodeURIComponent(characterId)}/message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      if (!res.ok) {
+        charReply.textContent = "Character not found.";
+        return;
+      }
+      const data = await res.json();
+      charReply.textContent = data.text;
+      charStateBadge.textContent = `state: ${data.state}`;
+      charMessageInput.value = "";
+    } catch (err) {
+      charReply.textContent = "Could not reach character.";
+    }
+  }
+  document.getElementById("btn-char-send").addEventListener("click", sendCharacterMessage);
+  charMessageInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendCharacterMessage();
   });
 })();
 </script>
