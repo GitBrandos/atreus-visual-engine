@@ -60,10 +60,21 @@ commit it to source control. Set it before use, e.g.:
 export OPENAI_API_KEY="sk-..."
 ```
 
-or place it in a local `.env` file (already listed in `.gitignore`) and
-load it into your shell/session before running Atreus. Without
-`OpenAIReplyBackend`, `MonicaCharacter` defaults to a dependency-free
-`EchoReplyBackend`.
+or place it in a local `.env` file (copy `.env.example`, already listed in
+`.gitignore`) and load it into your shell/session before running Atreus.
+Without `OpenAIReplyBackend`, `MonicaCharacter` defaults to a
+dependency-free `EchoReplyBackend`.
+
+Use `create_character()` to build a `MonicaCharacter` that automatically
+picks `OpenAIReplyBackend` when `OPENAI_API_KEY` is set, or falls back to
+`EchoReplyBackend` otherwise:
+
+```python
+from atreus.character import create_character
+
+monica = create_character()
+print(monica.respond("hello"))
+```
 
 ## Running the desktop simulation only
 

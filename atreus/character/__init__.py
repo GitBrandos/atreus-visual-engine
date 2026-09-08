@@ -11,6 +11,7 @@ from atreus.character.monica import (
     MonicaCharacter,
     Personality,
     ReplyBackend,
+    create_character,
 )
 from atreus.character.openai_backend import OpenAIReplyBackend
 
@@ -22,4 +23,5 @@ __all__ = [
     "OpenAIReplyBackend",
     "Personality",
     "ReplyBackend",
+    "create_character",
 ]

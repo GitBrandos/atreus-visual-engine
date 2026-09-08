@@ -110,3 +110,22 @@ class MonicaCharacter:
         )
         self.state.add_turn(self.personality.name.lower(), reply)
         return reply
+
+
+def create_character(personality: Personality | None = None) -> MonicaCharacter:
+    """Build a :class:`MonicaCharacter` with the best available backend.
+
+    If the ``OPENAI_API_KEY`` environment variable is set, replies are
+    generated via :class:`~atreus.character.openai_backend.OpenAIReplyBackend`.
+    Otherwise, the dependency-free :class:`EchoReplyBackend` is used, so this
+    always succeeds even without an API key configured.
+    """
+    import os
+
+    if os.environ.get("OPENAI_API_KEY"):
+        from atreus.character.openai_backend import OpenAIReplyBackend
+
+        backend: ReplyBackend = OpenAIReplyBackend()
+    else:
+        backend = EchoReplyBackend()
+    return MonicaCharacter(personality=personality, backend=backend)
