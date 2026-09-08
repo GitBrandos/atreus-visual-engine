@@ -12,12 +12,14 @@ from atreus.character.monica import (
     Personality,
     ReplyBackend,
 )
+from atreus.character.openai_backend import OpenAIReplyBackend
 
 __all__ = [
     "ConversationState",
     "ConversationTurn",
     "EchoReplyBackend",
     "MonicaCharacter",
+    "OpenAIReplyBackend",
     "Personality",
     "ReplyBackend",
 ]
