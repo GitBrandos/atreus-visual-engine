@@ -44,6 +44,38 @@ Configuration constants live in `atreus/config.py`:
 pip install -r requirements.txt
 ```
 
+## Monica character module
+
+`atreus/character/` adds an isolated Monica character layer (personality,
+conversation state, and reply backends) alongside the existing simulation —
+nothing in `atreus/simulation`, `atreus/protocol`, `atreus/agents`, or
+`atreus/server` is affected by it.
+
+`OpenAIReplyBackend` (`atreus/character/openai_backend.py`) generates
+Monica's replies via the OpenAI Chat Completions API. It reads its API key
+from the `OPENAI_API_KEY` environment variable — never hard-code it or
+commit it to source control. Set it before use, e.g.:
+
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+or place it in a local `.env` file (copy `.env.example`, already listed in
+`.gitignore`) and load it into your shell/session before running Atreus.
+Without `OpenAIReplyBackend`, `MonicaCharacter` defaults to a
+dependency-free `EchoReplyBackend`.
+
+Use `create_character()` to build a `MonicaCharacter` that automatically
+picks `OpenAIReplyBackend` when `OPENAI_API_KEY` is set, or falls back to
+`EchoReplyBackend` otherwise:
+
+```python
+from atreus.character import create_character
+
+monica = create_character()
+print(monica.respond("hello"))
+```
+
 ## Running the desktop simulation only
 
 ```bash
