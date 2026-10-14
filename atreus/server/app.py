@@ -28,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 
 from atreus.agents import AgentCommand, AgentController
 from atreus.bridge.cache import SharedParticleCache
-from atreus.character.dialogue import DialogueEngine, TemplateDialogueEngine
+from atreus.character.dialogue import DialogueEngine, SafetyGuardedDialogueEngine, TemplateDialogueEngine
 from atreus.character.models import Character
 from atreus.character.registry import CharacterNotFoundError, CharacterRegistry, CharacterStore
 from atreus.character.store import JSONFileStore
@@ -111,6 +111,13 @@ def create_app(
     ``character_store`` are mutually exclusive: if a registry is injected
     directly, ``character_store`` is ignored (the caller already decided how
     that registry persists, if at all).
+
+    ``dialogue_engine`` defaults to the offline :class:`TemplateDialogueEngine`,
+    wrapped in :class:`atreus.character.dialogue.SafetyGuardedDialogueEngine`
+    so the baseline guardrails (bounded replies, fails-closed on error,
+    prompt-injection filtering) apply even without a custom backend. To plug
+    in a real backend, wrap it the same way, e.g.
+    ``create_app(dialogue_engine=SafetyGuardedDialogueEngine(MyLLMEngine()))``.
     """
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -142,7 +149,11 @@ def create_app(
         if character_registry is not None
         else CharacterRegistry(store=character_store)
     )
-    app.state.dialogue_engine = dialogue_engine if dialogue_engine is not None else TemplateDialogueEngine()
+    app.state.dialogue_engine = (
+        dialogue_engine
+        if dialogue_engine is not None
+        else SafetyGuardedDialogueEngine(TemplateDialogueEngine())
+    )
     app.state.loop = SimulationLoop(
         app.state.system,
         app.state.cache,

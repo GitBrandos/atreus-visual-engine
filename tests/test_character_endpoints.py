@@ -123,3 +123,58 @@ def test_message_unknown_character_returns_404():
     with TestClient(app) as client:
         response = client.post("/api/characters/missing/message", json={"message": "hi"})
         assert response.status_code == 404
+
+
+def test_concurrent_messages_to_different_characters_do_not_cross_talk():
+    """Hammers `/message` for several distinct characters concurrently and
+    checks each character's final state/registry entry only ever reflects
+    replies addressed to it -- i.e. the shared registry lock doesn't let one
+    character's update clobber or leak into another's."""
+    import concurrent.futures
+
+    app, registry = _build_app()
+    character_ids = [f"char-{i}" for i in range(8)]
+    with TestClient(app) as client:
+        for character_id in character_ids:
+            client.post("/api/characters", json={"id": character_id, "name": character_id})
+
+        def send(character_id: str) -> tuple[str, int, str]:
+            response = client.post(
+                f"/api/characters/{character_id}/message",
+                json={"message": f"hello from {character_id}"},
+            )
+            return character_id, response.status_code, response.json()["text"]
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(send, character_ids * 5))
+
+        for character_id, status_code, text in results:
+            assert status_code == 200
+            assert character_id in text  # each reply echoes only its own character's message
+
+        for character_id in character_ids:
+            assert registry.get(character_id).id == character_id
+            assert registry.get(character_id).state.value == "active"
+
+
+def test_concurrent_messages_to_same_character_are_serialized_safely():
+    """Many concurrent messages to a single character should all succeed and
+    leave the registry in a consistent (not corrupted/partially-written) state."""
+    import concurrent.futures
+
+    app, registry = _build_app()
+    with TestClient(app) as client:
+        client.post("/api/characters", json={"id": "nova", "name": "Nova"})
+
+        def send(i: int) -> int:
+            response = client.post("/api/characters/nova/message", json={"message": f"msg {i}"})
+            return response.status_code
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+            statuses = list(executor.map(send, range(50)))
+
+        assert all(status == 200 for status in statuses)
+        final = registry.get("nova")
+        assert final.id == "nova"
+        assert final.name == "Nova"
+        assert final.state.value == "active"
