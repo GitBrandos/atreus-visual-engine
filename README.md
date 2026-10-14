@@ -108,12 +108,49 @@ Endpoints:
 - `GET /api/characters/{character_id}` — fetch a single character (includes its `position` and stable `marker_color`)
 - `POST /api/characters/{character_id}/message` — send `{"message": "..."}` and get back `{"text": "...", "state": "idle" | "active" | "reacting"}`; the resulting state is also reflected in subsequent `/ws/particles` snapshots
 
+## Creating your first character
+
+With the server running (`uvicorn atreus.server.app:app --host 0.0.0.0 --port 8000`, or the desktop+server script from above), you can register and talk to a character entirely from the command line:
+
+```bash
+# 1. Register a character. `position` is optional (defaults to the world's
+#    center); traits are optional floats in [0.0, 1.0].
+curl -X POST http://localhost:8000/api/characters \
+  -H "Content-Type: application/json" \
+  -d '{
+        "id": "nova",
+        "name": "Nova",
+        "description": "A curious, upbeat guide to the particle world.",
+        "backstory": "Nova has watched this particle field drift for as long as it has existed.",
+        "traits": {"curiosity": 0.9, "warmth": 0.8},
+        "interests": ["astronomy", "cloud formations"],
+        "position": [200, 200]
+      }'
+
+# 2. Fetch it back -- note the server-assigned, stable `marker_color`.
+curl http://localhost:8000/api/characters/nova
+
+# 3. Send it a chat message and see its reply + resulting behavioural state.
+curl -X POST http://localhost:8000/api/characters/nova/message \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What do you see out there?"}'
+
+# 4. List every registered character.
+curl http://localhost:8000/api/characters
+```
+
+Open `http://localhost:8000/` in a browser and Nova should now be visible as a
+labeled, colored marker drifting gently around the particle canvas near
+`(200, 200)` — click/tap its marker directly on the canvas (or use the
+dropdown in the character panel) to select it, then send it a message from
+the chat box to watch its marker pulse while it's `reacting`.
+
 ## Opening the mobile UI from a phone on the same network
 
 1. Find your machine's LAN IP address (e.g. `ifconfig` / `ipconfig`, look for something like `192.168.x.x`).
 2. Start the server as above, bound to `0.0.0.0` (the default) so it's reachable from other devices.
 3. On your phone (connected to the same Wi-Fi network), open `http://<your-lan-ip>:8000/` in a browser.
-4. The page connects to `/ws/particles` automatically and renders the live particle stream, with pause/resume/reset buttons, attraction/jitter sliders, and a character select/chat panel. Registered characters appear as labeled, colored markers on the canvas at their world position, and a marker pulses/glows while that character is `active` or `reacting`.
+4. The page connects to `/ws/particles` automatically and renders the live particle stream, with pause/resume/reset buttons, attraction/jitter sliders, and a character select/chat panel. Registered characters appear as labeled, colored markers on the canvas at their world position, drifting gently over time; a marker pulses/glows while that character is `active` or `reacting`. Tapping a marker directly on the canvas selects that character in the chat panel, the same as choosing it from the dropdown.
 
 ## Expected update rates and limitations
 
@@ -122,6 +159,7 @@ Endpoints:
 - Mobile broadcast: every 500ms per connected client; actual mobile framerate is therefore ~2 updates/sec, not 60 FPS — this is a deliberate bandwidth/latency tradeoff for phones on Wi-Fi.
 - The mobile canvas interpolates nothing between updates (particles "jump" every 500ms); this keeps the client simple at the cost of visual smoothness.
 - Agent commands are applied on the next simulation tick after being queued, so there is up to one frame of latency.
-- This is a single-process, in-memory architecture: running the desktop simulation and the FastAPI server as separate OS processes will give each its own independent simulation state (no cross-process IPC is implemented). The character registry is likewise in-memory and not yet persisted across restarts.
-- The bundled `TemplateDialogueEngine` is a minimal, fully offline, rule-based default; swap in a real inference backend by implementing the `DialogueEngine` protocol in `atreus/character/dialogue.py`.
+- This is a single-process, in-memory-first architecture: running the desktop simulation and the FastAPI server as separate OS processes will give each its own independent simulation state (no cross-process IPC is implemented). The character registry persists to `characters.json` (see `atreus.character.store.JSONFileStore`) when run via `uvicorn atreus.server.app:app`, so registered characters survive a restart of that process; tests and custom `create_app(...)` callers that don't pass `character_store` still get a purely in-memory registry.
+- Characters wander and gently drift toward nearby particle clusters every simulation tick (`atreus.character.movement.step_characters`); this motion is intentionally not persisted (see `CharacterRegistry.set_position`), so only a character's *last deliberately set* position (e.g. at creation) is durable — the live wandering position is recomputed each run.
+- The bundled `TemplateDialogueEngine` is a minimal, fully offline, rule-based default. All dialogue responses (including the default) pass through `atreus.character.dialogue.SafetyGuardedDialogueEngine`, which bounds reply length, fails closed if a backend errors, and blocks obvious prompt-injection markers. Swap in a real inference backend by implementing the `DialogueEngine` protocol and wrapping it the same way: `create_app(dialogue_engine=SafetyGuardedDialogueEngine(MyBackend()))`.
 

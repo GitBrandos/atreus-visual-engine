@@ -172,6 +172,53 @@
   let messageTimestamps = [];
   let lastMessageAt = null;
 
+  // Clicking/tapping a character's marker selects it in the chat panel, so
+  // "characters live in the world" rather than only existing in a dropdown:
+  // the canvas becomes a direct way to start talking to whoever is nearby.
+  const MARKER_HIT_RADIUS_PX = 16;
+
+  function findMarkerAtCanvasPoint(canvasX, canvasY) {
+    if (!latest || !latest.character_markers) return null;
+    const sx = canvas.width / worldWidth;
+    const sy = canvas.height / worldHeight;
+    let closest = null;
+    let closestDistSq = Infinity;
+    for (const marker of latest.character_markers) {
+      const [wx, wy] = marker.position;
+      const dx = wx * sx - canvasX;
+      const dy = wy * sy - canvasY;
+      const distSq = dx * dx + dy * dy;
+      if (distSq <= MARKER_HIT_RADIUS_PX * MARKER_HIT_RADIUS_PX && distSq < closestDistSq) {
+        closest = marker;
+        closestDistSq = distSq;
+      }
+    }
+    return closest;
+  }
+
+  function selectCharacterFromCanvas(marker) {
+    const select = document.getElementById("char-select");
+    if (!select) return;
+    select.value = marker.id;
+    document.getElementById("char-state-badge").textContent = `state: ${marker.state}`;
+    const messageInput = document.getElementById("char-message");
+    if (messageInput) messageInput.focus();
+  }
+
+  canvas.addEventListener("click", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (event.clientX - rect.left) * (canvas.width / rect.width);
+    const canvasY = (event.clientY - rect.top) * (canvas.height / rect.height);
+    const marker = findMarkerAtCanvasPoint(canvasX, canvasY);
+    if (marker) selectCharacterFromCanvas(marker);
+  });
+  canvas.addEventListener("mousemove", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (event.clientX - rect.left) * (canvas.width / rect.width);
+    const canvasY = (event.clientY - rect.top) * (canvas.height / rect.height);
+    canvas.style.cursor = findMarkerAtCanvasPoint(canvasX, canvasY) ? "pointer" : "default";
+  });
+
   function draw() {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
