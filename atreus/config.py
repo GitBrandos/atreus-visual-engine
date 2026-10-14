@@ -29,3 +29,9 @@ STREAM_INTERVAL_MS = 500
 #: Default host/port for the FastAPI streaming server.
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
+
+# --- Character persistence ----------------------------------------------------
+#: Default path for the on-disk character store, relative to the process's
+#: working directory. Set to ``None`` (e.g. via `create_app(character_store=None)`)
+#: to run with a purely in-memory registry (handy for tests).
+CHARACTER_STORE_PATH = "characters.json"

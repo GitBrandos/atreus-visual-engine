@@ -11,7 +11,7 @@ I/O -- so the simulation loop is never stalled by slow clients.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
@@ -35,6 +35,11 @@ class CacheSnapshot:
     sample_count: int
     fps: float = 0.0
     frame_time_ms: float = 0.0
+    #: Optional per-character world markers (id, name, position, color,
+    #: state), populated when a `CharacterRegistry` is wired into the
+    #: `SimulationLoop`; empty otherwise, so plain particle-sandbox usage
+    #: is unaffected.
+    character_markers: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         """Return a plain dict suitable for JSON serialization."""
@@ -47,6 +52,7 @@ class CacheSnapshot:
             "sample_count": self.sample_count,
             "fps": self.fps,
             "frame_time_ms": self.frame_time_ms,
+            "character_markers": self.character_markers,
         }
 
 
@@ -63,6 +69,7 @@ class SharedParticleCache:
         system: ParticleSystem,
         fps: float = 0.0,
         frame_time_ms: float = 0.0,
+        character_markers: list[dict[str, Any]] | None = None,
     ) -> CacheSnapshot:
         """Down-sample ``system`` state and store it as the latest snapshot."""
         count = system.positions.shape[0]
@@ -86,6 +93,7 @@ class SharedParticleCache:
             sample_count=int(sample_count),
             fps=round(fps, 1),
             frame_time_ms=round(frame_time_ms, 2),
+            character_markers=list(character_markers) if character_markers else [],
         )
         with self._lock:
             self._snapshot = snapshot

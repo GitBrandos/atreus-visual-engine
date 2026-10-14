@@ -22,14 +22,25 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from atreus.agents import AgentCommand, AgentController
 from atreus.bridge.cache import SharedParticleCache
-from atreus.config import DESKTOP_PARTICLE_COUNT, STREAM_INTERVAL_MS, TARGET_FPS
-from atreus.protocol import AgentCommandMessage, StatusMessage
+from atreus.character.dialogue import DialogueEngine, SafetyGuardedDialogueEngine, TemplateDialogueEngine
+from atreus.character.models import Character
+from atreus.character.registry import CharacterNotFoundError, CharacterRegistry, CharacterStore
+from atreus.character.store import JSONFileStore
+from atreus.config import CHARACTER_STORE_PATH, DESKTOP_PARTICLE_COUNT, STREAM_INTERVAL_MS, TARGET_FPS
+from atreus.protocol import (
+    AgentCommandMessage,
+    CharacterCreateRequest,
+    CharacterMessageRequest,
+    CharacterMessageResponse,
+    CharacterResponse,
+    StatusMessage,
+)
 from atreus.simulation.loop import SimulationLoop
 from atreus.simulation.particles import ParticleSystem
 
@@ -70,6 +81,11 @@ class ConnectionManager:
         return len(self._connections)
 
 
+def _to_character_response(character: Character) -> CharacterResponse:
+    """Convert an internal `Character` model to its wire representation."""
+    return CharacterResponse(**character.model_dump(), marker_color=character.marker_color)
+
+
 def create_app(
     system: ParticleSystem | None = None,
     cache: SharedParticleCache | None = None,
@@ -77,6 +93,9 @@ def create_app(
     run_simulation: bool = True,
     particle_count: int = DESKTOP_PARTICLE_COUNT,
     target_fps: int = TARGET_FPS,
+    character_registry: CharacterRegistry | None = None,
+    character_store: CharacterStore | None = None,
+    dialogue_engine: DialogueEngine | None = None,
 ) -> FastAPI:
     """Build the FastAPI streaming app.
 
@@ -84,6 +103,21 @@ def create_app(
     ``controller`` are injected, the app starts its own headless background
     simulation thread on startup so it can run independently of the desktop
     process.
+
+    If ``character_registry`` is not given, a fresh one is created; passing
+    ``character_store`` (e.g. a :class:`atreus.character.store.JSONFileStore`)
+    in that case makes the new registry load existing characters from disk
+    on startup and persist changes as they happen. ``character_registry`` and
+    ``character_store`` are mutually exclusive: if a registry is injected
+    directly, ``character_store`` is ignored (the caller already decided how
+    that registry persists, if at all).
+
+    ``dialogue_engine`` defaults to the offline :class:`TemplateDialogueEngine`,
+    wrapped in :class:`atreus.character.dialogue.SafetyGuardedDialogueEngine`
+    so the baseline guardrails (bounded replies, fails-closed on error,
+    prompt-injection filtering) apply even without a custom backend. To plug
+    in a real backend, wrap it the same way, e.g.
+    ``create_app(dialogue_engine=SafetyGuardedDialogueEngine(MyLLMEngine()))``.
     """
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -110,7 +144,22 @@ def create_app(
     app.state.cache = cache if cache is not None else SharedParticleCache()
     app.state.controller = controller if controller is not None else AgentController()
     app.state.manager = ConnectionManager()
-    app.state.loop = SimulationLoop(app.state.system, app.state.cache, app.state.controller)
+    app.state.character_registry = (
+        character_registry
+        if character_registry is not None
+        else CharacterRegistry(store=character_store)
+    )
+    app.state.dialogue_engine = (
+        dialogue_engine
+        if dialogue_engine is not None
+        else SafetyGuardedDialogueEngine(TemplateDialogueEngine())
+    )
+    app.state.loop = SimulationLoop(
+        app.state.system,
+        app.state.cache,
+        app.state.controller,
+        character_registry=app.state.character_registry,
+    )
     app.state.sim_thread = None
     app.state.run_simulation = run_simulation
     app.state.started_at = time.time()
@@ -149,6 +198,47 @@ def create_app(
         except ValueError:
             return {"ok": False, "error": f"Unsupported action: {message.action}"}
         return {"ok": True}
+
+    @app.get("/api/characters", response_model=list[CharacterResponse])
+    async def list_characters() -> list[CharacterResponse]:
+        return [_to_character_response(c) for c in app.state.character_registry.list()]
+
+    @app.post("/api/characters", response_model=CharacterResponse)
+    async def create_character(request: CharacterCreateRequest) -> CharacterResponse:
+        # All trait/content validation happens server-side via the `Character`
+        # model; clients cannot set fields (e.g. `state`) outside this schema.
+        data = request.model_dump()
+        if data.get("position") is None:
+            data.pop("position", None)
+        try:
+            character = Character(**data)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        try:
+            app.state.character_registry.create(character)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _to_character_response(character)
+
+    @app.get("/api/characters/{character_id}", response_model=CharacterResponse)
+    async def get_character(character_id: str) -> CharacterResponse:
+        try:
+            character = app.state.character_registry.get(character_id)
+        except CharacterNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"Unknown character: {character_id}") from exc
+        return _to_character_response(character)
+
+    @app.post("/api/characters/{character_id}/message", response_model=CharacterMessageResponse)
+    async def message_character(
+        character_id: str, request: CharacterMessageRequest
+    ) -> CharacterMessageResponse:
+        try:
+            character = app.state.character_registry.get(character_id)
+        except CharacterNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=f"Unknown character: {character_id}") from exc
+        turn = app.state.dialogue_engine.respond(character, request.message)
+        app.state.character_registry.set_state(character_id, turn.state)
+        return CharacterMessageResponse(text=turn.text, state=turn.state)
 
     @app.websocket("/ws/particles")
     async def particles_ws(websocket: WebSocket) -> None:
@@ -190,4 +280,7 @@ async def _broadcast_loop(app: FastAPI) -> None:
 
 
 #: Module-level app so ``uvicorn atreus.server.app:app`` works standalone.
-app = create_app()
+#: Characters persist to ``CHARACTER_STORE_PATH`` (relative to the working
+#: directory this process is started from) so registered characters survive
+#: restarts of the standalone server.
+app = create_app(character_store=JSONFileStore(CHARACTER_STORE_PATH))

@@ -63,6 +63,42 @@
   .slider-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
   .slider-row label { width: 5.5rem; color: var(--muted); }
   .slider-row input { flex: 1; }
+  .character-panel {
+    margin: 0 1rem 1.25rem;
+    padding: 0.75rem;
+    background: var(--panel);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .character-panel h2 { font-size: 0.85rem; margin: 0 0 0.25rem; }
+  .character-row { display: flex; gap: 0.5rem; }
+  .character-row select, .character-row input, .character-row button {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid #33334a;
+    border-radius: 8px;
+    background: #1c1c2b;
+    color: var(--text);
+    font-size: 0.85rem;
+  }
+  .character-row button { flex: 0 0 auto; }
+  #char-state-badge {
+    align-self: flex-start;
+    font-size: 0.7rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  #char-reply {
+    min-height: 2.5rem;
+    font-size: 0.85rem;
+    color: var(--text);
+    background: #1c1c2b;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+  }
 </style>
 </head>
 <body>
@@ -100,6 +136,21 @@
     </div>
   </div>
 
+  <div class="character-panel">
+    <h2>Characters</h2>
+    <div class="character-row">
+      <select id="char-select"><option value="">No characters yet</option></select>
+      <button id="btn-char-new">New</button>
+    </div>
+    <div id="char-state-badge">state: -</div>
+    <div class="character-row">
+      <input type="text" id="char-message" placeholder="Say something…" />
+      <button id="btn-char-send">Send</button>
+    </div>
+    <div id="char-reply"></div>
+  </div>
+
+
 <script>
 (() => {
   const canvas = document.getElementById("canvas");
@@ -121,6 +172,53 @@
   let messageTimestamps = [];
   let lastMessageAt = null;
 
+  // Clicking/tapping a character's marker selects it in the chat panel, so
+  // "characters live in the world" rather than only existing in a dropdown:
+  // the canvas becomes a direct way to start talking to whoever is nearby.
+  const MARKER_HIT_RADIUS_PX = 16;
+
+  function findMarkerAtCanvasPoint(canvasX, canvasY) {
+    if (!latest || !latest.character_markers) return null;
+    const sx = canvas.width / worldWidth;
+    const sy = canvas.height / worldHeight;
+    let closest = null;
+    let closestDistSq = Infinity;
+    for (const marker of latest.character_markers) {
+      const [wx, wy] = marker.position;
+      const dx = wx * sx - canvasX;
+      const dy = wy * sy - canvasY;
+      const distSq = dx * dx + dy * dy;
+      if (distSq <= MARKER_HIT_RADIUS_PX * MARKER_HIT_RADIUS_PX && distSq < closestDistSq) {
+        closest = marker;
+        closestDistSq = distSq;
+      }
+    }
+    return closest;
+  }
+
+  function selectCharacterFromCanvas(marker) {
+    const select = document.getElementById("char-select");
+    if (!select) return;
+    select.value = marker.id;
+    document.getElementById("char-state-badge").textContent = `state: ${marker.state}`;
+    const messageInput = document.getElementById("char-message");
+    if (messageInput) messageInput.focus();
+  }
+
+  canvas.addEventListener("click", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (event.clientX - rect.left) * (canvas.width / rect.width);
+    const canvasY = (event.clientY - rect.top) * (canvas.height / rect.height);
+    const marker = findMarkerAtCanvasPoint(canvasX, canvasY);
+    if (marker) selectCharacterFromCanvas(marker);
+  });
+  canvas.addEventListener("mousemove", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const canvasX = (event.clientX - rect.left) * (canvas.width / rect.width);
+    const canvasY = (event.clientY - rect.top) * (canvas.height / rect.height);
+    canvas.style.cursor = findMarkerAtCanvasPoint(canvasX, canvasY) ? "pointer" : "default";
+  });
+
   function draw() {
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -135,10 +233,61 @@
         ctx.fillStyle = `rgb(${r},${g},${b})`;
         ctx.fillRect(x * sx, y * sy, 2, 2);
       }
+      drawCharacterMarkers(sx, sy);
     }
     requestAnimationFrame(draw);
   }
   requestAnimationFrame(draw);
+
+  // A character's world marker is a labeled, colored ring whose radius and
+  // glow pulse while that character is "reacting" (i.e. right after it
+  // replies to a chat message), so its on-canvas presence visibly reflects
+  // its live behavioural state rather than staying a static dot.
+  function drawCharacterMarkers(sx, sy) {
+    const markers = latest.character_markers;
+    if (!markers || markers.length === 0) return;
+    const now = performance.now();
+    for (const marker of markers) {
+      const [wx, wy] = marker.position;
+      const x = wx * sx;
+      const y = wy * sy;
+      const [r, g, b] = marker.color;
+      const baseColor = `rgb(${r},${g},${b})`;
+
+      let radius = 8;
+      let glow = 0;
+      if (marker.state === "reacting") {
+        // Fast pulse: visibly "excited" right after a chat reply.
+        const phase = (now / 150) % (Math.PI * 2);
+        radius = 9 + Math.sin(phase) * 4;
+        glow = 18;
+      } else if (marker.state === "active") {
+        // Slow breathing pulse: engaged in conversation.
+        const phase = (now / 900) % (Math.PI * 2);
+        radius = 8 + Math.sin(phase) * 1.5;
+        glow = 8;
+      }
+
+      if (glow > 0) {
+        ctx.save();
+        ctx.shadowColor = baseColor;
+        ctx.shadowBlur = glow;
+      }
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = baseColor;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#fff";
+      ctx.stroke();
+      if (glow > 0) ctx.restore();
+
+      ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.fillText(marker.name, x, y - radius - 6);
+    }
+  }
 
   function updateMetrics() {
     if (!latest) return;
@@ -177,6 +326,11 @@
         lastMessageAt = Date.now();
         messageTimestamps.push(lastMessageAt);
         updateMetrics();
+        const selectedId = document.getElementById("char-select").value;
+        const marker = (data.character_markers || []).find((m) => m.id === selectedId);
+        if (marker) {
+          document.getElementById("char-state-badge").textContent = `state: ${marker.state}`;
+        }
       }
     };
 
@@ -197,6 +351,88 @@
   });
   document.getElementById("jitter").addEventListener("change", (e) => {
     window.__sendCommand("set_param", { name: "jitter", value: parseFloat(e.target.value) });
+  });
+
+  // --- Character panel -------------------------------------------------
+  const charSelect = document.getElementById("char-select");
+  const charStateBadge = document.getElementById("char-state-badge");
+  const charReply = document.getElementById("char-reply");
+  const charMessageInput = document.getElementById("char-message");
+
+  function populateCharacterSelect(characters) {
+    const previous = charSelect.value;
+    charSelect.innerHTML = "";
+    if (characters.length === 0) {
+      const opt = document.createElement("option");
+      opt.value = "";
+      opt.textContent = "No characters yet";
+      charSelect.appendChild(opt);
+      return;
+    }
+    for (const character of characters) {
+      const opt = document.createElement("option");
+      opt.value = character.id;
+      opt.textContent = character.name;
+      charSelect.appendChild(opt);
+    }
+    if (characters.some((c) => c.id === previous)) {
+      charSelect.value = previous;
+    }
+  }
+
+  async function refreshCharacters() {
+    try {
+      const res = await fetch("/api/characters");
+      const characters = await res.json();
+      populateCharacterSelect(characters);
+    } catch (err) {
+      // Non-fatal: character panel is additive to the particle stream.
+    }
+  }
+  refreshCharacters();
+
+  document.getElementById("btn-char-new").addEventListener("click", async () => {
+    const name = prompt("Character name?");
+    if (!name) return;
+    const id = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 64) || `char-${Date.now()}`;
+    try {
+      await fetch("/api/characters", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name }),
+      });
+      await refreshCharacters();
+      charSelect.value = id;
+    } catch (err) {
+      charReply.textContent = "Could not create character.";
+    }
+  });
+
+  async function sendCharacterMessage() {
+    const characterId = charSelect.value;
+    const message = charMessageInput.value.trim();
+    if (!characterId || !message) return;
+    try {
+      const res = await fetch(`/api/characters/${encodeURIComponent(characterId)}/message`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      if (!res.ok) {
+        charReply.textContent = "Character not found.";
+        return;
+      }
+      const data = await res.json();
+      charReply.textContent = data.text;
+      charStateBadge.textContent = `state: ${data.state}`;
+      charMessageInput.value = "";
+    } catch (err) {
+      charReply.textContent = "Could not reach character.";
+    }
+  }
+  document.getElementById("btn-char-send").addEventListener("click", sendCharacterMessage);
+  charMessageInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendCharacterMessage();
   });
 })();
 </script>
