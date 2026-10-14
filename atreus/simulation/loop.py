@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from atreus.agents import AgentController
 from atreus.bridge.cache import SharedParticleCache
+from atreus.character.movement import step_characters
 from atreus.config import CACHE_SYNC_INTERVAL_MS, TARGET_FPS
 from atreus.simulation.particles import ParticleSystem
 
@@ -44,6 +45,9 @@ class SimulationLoop:
         frame_start = time.perf_counter()
         self.system.step(dt)
         frame_time_ms = (time.perf_counter() - frame_start) * 1000.0
+
+        if self.character_registry is not None:
+            step_characters(self.character_registry, self.system, dt)
 
         now = time.perf_counter()
         if (now - self._last_cache_update) * 1000.0 >= CACHE_SYNC_INTERVAL_MS:

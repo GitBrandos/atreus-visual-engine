@@ -30,8 +30,9 @@ from atreus.agents import AgentCommand, AgentController
 from atreus.bridge.cache import SharedParticleCache
 from atreus.character.dialogue import DialogueEngine, TemplateDialogueEngine
 from atreus.character.models import Character
-from atreus.character.registry import CharacterNotFoundError, CharacterRegistry
-from atreus.config import DESKTOP_PARTICLE_COUNT, STREAM_INTERVAL_MS, TARGET_FPS
+from atreus.character.registry import CharacterNotFoundError, CharacterRegistry, CharacterStore
+from atreus.character.store import JSONFileStore
+from atreus.config import CHARACTER_STORE_PATH, DESKTOP_PARTICLE_COUNT, STREAM_INTERVAL_MS, TARGET_FPS
 from atreus.protocol import (
     AgentCommandMessage,
     CharacterCreateRequest,
@@ -93,6 +94,7 @@ def create_app(
     particle_count: int = DESKTOP_PARTICLE_COUNT,
     target_fps: int = TARGET_FPS,
     character_registry: CharacterRegistry | None = None,
+    character_store: CharacterStore | None = None,
     dialogue_engine: DialogueEngine | None = None,
 ) -> FastAPI:
     """Build the FastAPI streaming app.
@@ -101,6 +103,14 @@ def create_app(
     ``controller`` are injected, the app starts its own headless background
     simulation thread on startup so it can run independently of the desktop
     process.
+
+    If ``character_registry`` is not given, a fresh one is created; passing
+    ``character_store`` (e.g. a :class:`atreus.character.store.JSONFileStore`)
+    in that case makes the new registry load existing characters from disk
+    on startup and persist changes as they happen. ``character_registry`` and
+    ``character_store`` are mutually exclusive: if a registry is injected
+    directly, ``character_store`` is ignored (the caller already decided how
+    that registry persists, if at all).
     """
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -127,7 +137,11 @@ def create_app(
     app.state.cache = cache if cache is not None else SharedParticleCache()
     app.state.controller = controller if controller is not None else AgentController()
     app.state.manager = ConnectionManager()
-    app.state.character_registry = character_registry if character_registry is not None else CharacterRegistry()
+    app.state.character_registry = (
+        character_registry
+        if character_registry is not None
+        else CharacterRegistry(store=character_store)
+    )
     app.state.dialogue_engine = dialogue_engine if dialogue_engine is not None else TemplateDialogueEngine()
     app.state.loop = SimulationLoop(
         app.state.system,
@@ -255,4 +269,7 @@ async def _broadcast_loop(app: FastAPI) -> None:
 
 
 #: Module-level app so ``uvicorn atreus.server.app:app`` works standalone.
-app = create_app()
+#: Characters persist to ``CHARACTER_STORE_PATH`` (relative to the working
+#: directory this process is started from) so registered characters survive
+#: restarts of the standalone server.
+app = create_app(character_store=JSONFileStore(CHARACTER_STORE_PATH))
