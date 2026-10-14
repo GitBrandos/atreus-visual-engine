@@ -51,5 +51,5 @@ def test_to_dict_is_json_friendly():
         "sample_count",
         "fps",
         "frame_time_ms",
-        "character_states",
+        "character_markers",
     }

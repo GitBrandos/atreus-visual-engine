@@ -37,6 +37,37 @@ def test_create_character_returns_stored_character():
         assert data["id"] == "nova"
         assert data["name"] == "Nova"
         assert data["state"] == "idle"
+        assert len(data["position"]) == 2
+        assert len(data["marker_color"]) == 3
+
+
+def test_create_character_accepts_explicit_position():
+    app, _registry = _build_app()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/characters",
+            json={"id": "nova", "name": "Nova", "position": [100, 200]},
+        )
+        assert response.status_code == 200
+        assert response.json()["position"] == [100.0, 200.0]
+
+
+def test_create_character_rejects_out_of_bounds_position():
+    app, _registry = _build_app()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/characters",
+            json={"id": "nova", "name": "Nova", "position": [-5, 0]},
+        )
+        assert response.status_code == 422
+
+
+def test_create_character_marker_color_is_stable():
+    app, registry = _build_app()
+    with TestClient(app) as client:
+        response = client.post("/api/characters", json={"id": "nova", "name": "Nova"})
+        color = response.json()["marker_color"]
+        assert color == registry.get("nova").marker_color
 
 
 def test_create_character_rejects_duplicate_id():

@@ -16,6 +16,16 @@ class AgentCommandMessage(BaseModel):
     payload: dict[str, Any] | None = None
 
 
+class CharacterMarker(BaseModel):
+    """A character's world position/appearance, for rendering in the canvas."""
+
+    id: str
+    name: str
+    position: tuple[float, float]
+    color: list[int]
+    state: CharacterState
+
+
 class ParticleSnapshotMessage(BaseModel):
     """Outbound down-sampled particle snapshot streamed to clients."""
 
@@ -28,7 +38,7 @@ class ParticleSnapshotMessage(BaseModel):
     sample_count: int
     fps: float = 0.0
     frame_time_ms: float = 0.0
-    character_states: dict[str, str] = Field(default_factory=dict)
+    character_markers: list[CharacterMarker] = Field(default_factory=list)
 
 
 class StatusMessage(BaseModel):
@@ -56,6 +66,7 @@ class CharacterCreateRequest(BaseModel):
     interaction_modes: list[InteractionMode] = Field(
         default_factory=lambda: [InteractionMode.CHAT]
     )
+    position: tuple[float, float] | None = None
 
 
 class CharacterResponse(BaseModel):
@@ -69,6 +80,8 @@ class CharacterResponse(BaseModel):
     interests: list[str]
     interaction_modes: list[InteractionMode]
     state: CharacterState
+    position: tuple[float, float]
+    marker_color: list[int]
 
 
 class CharacterMessageRequest(BaseModel):

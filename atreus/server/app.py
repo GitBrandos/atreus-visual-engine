@@ -82,7 +82,7 @@ class ConnectionManager:
 
 def _to_character_response(character: Character) -> CharacterResponse:
     """Convert an internal `Character` model to its wire representation."""
-    return CharacterResponse(**character.model_dump())
+    return CharacterResponse(**character.model_dump(), marker_color=character.marker_color)
 
 
 def create_app(
@@ -182,8 +182,11 @@ def create_app(
     async def create_character(request: CharacterCreateRequest) -> CharacterResponse:
         # All trait/content validation happens server-side via the `Character`
         # model; clients cannot set fields (e.g. `state`) outside this schema.
+        data = request.model_dump()
+        if data.get("position") is None:
+            data.pop("position", None)
         try:
-            character = Character(**request.model_dump())
+            character = Character(**data)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         try:

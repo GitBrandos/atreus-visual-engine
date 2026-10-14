@@ -47,16 +47,23 @@ class SimulationLoop:
 
         now = time.perf_counter()
         if (now - self._last_cache_update) * 1000.0 >= CACHE_SYNC_INTERVAL_MS:
-            character_states = None
+            character_markers = None
             if self.character_registry is not None:
-                character_states = {
-                    c.id: c.state.value for c in self.character_registry.list()
-                }
+                character_markers = [
+                    {
+                        "id": c.id,
+                        "name": c.name,
+                        "position": list(c.position),
+                        "color": c.marker_color,
+                        "state": c.state.value,
+                    }
+                    for c in self.character_registry.list()
+                ]
             self.cache.update(
                 self.system,
                 fps=fps,
                 frame_time_ms=frame_time_ms,
-                character_states=character_states,
+                character_markers=character_markers,
             )
             self._last_cache_update = now
 
