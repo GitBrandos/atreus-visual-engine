@@ -186,10 +186,61 @@
         ctx.fillStyle = `rgb(${r},${g},${b})`;
         ctx.fillRect(x * sx, y * sy, 2, 2);
       }
+      drawCharacterMarkers(sx, sy);
     }
     requestAnimationFrame(draw);
   }
   requestAnimationFrame(draw);
+
+  // A character's world marker is a labeled, colored ring whose radius and
+  // glow pulse while that character is "reacting" (i.e. right after it
+  // replies to a chat message), so its on-canvas presence visibly reflects
+  // its live behavioural state rather than staying a static dot.
+  function drawCharacterMarkers(sx, sy) {
+    const markers = latest.character_markers;
+    if (!markers || markers.length === 0) return;
+    const now = performance.now();
+    for (const marker of markers) {
+      const [wx, wy] = marker.position;
+      const x = wx * sx;
+      const y = wy * sy;
+      const [r, g, b] = marker.color;
+      const baseColor = `rgb(${r},${g},${b})`;
+
+      let radius = 8;
+      let glow = 0;
+      if (marker.state === "reacting") {
+        // Fast pulse: visibly "excited" right after a chat reply.
+        const phase = (now / 150) % (Math.PI * 2);
+        radius = 9 + Math.sin(phase) * 4;
+        glow = 18;
+      } else if (marker.state === "active") {
+        // Slow breathing pulse: engaged in conversation.
+        const phase = (now / 900) % (Math.PI * 2);
+        radius = 8 + Math.sin(phase) * 1.5;
+        glow = 8;
+      }
+
+      if (glow > 0) {
+        ctx.save();
+        ctx.shadowColor = baseColor;
+        ctx.shadowBlur = glow;
+      }
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = baseColor;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = "#fff";
+      ctx.stroke();
+      if (glow > 0) ctx.restore();
+
+      ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.fillText(marker.name, x, y - radius - 6);
+    }
+  }
 
   function updateMetrics() {
     if (!latest) return;
@@ -229,8 +280,9 @@
         messageTimestamps.push(lastMessageAt);
         updateMetrics();
         const selectedId = document.getElementById("char-select").value;
-        if (selectedId && data.character_states && data.character_states[selectedId]) {
-          document.getElementById("char-state-badge").textContent = `state: ${data.character_states[selectedId]}`;
+        const marker = (data.character_markers || []).find((m) => m.id === selectedId);
+        if (marker) {
+          document.getElementById("char-state-badge").textContent = `state: ${marker.state}`;
         }
       }
     };
